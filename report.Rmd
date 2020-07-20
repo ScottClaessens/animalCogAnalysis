@@ -1,0 +1,108 @@
+---
+title: "Animal Cognition Analyses - Simulation"
+author: Scott Claessens
+date: "`r format(Sys.Date())`"
+---
+
+```{r options, echo=F}
+options(width = 200)
+```
+
+The purpose of this document is to report the results of an example simulation to explore the relative advantages of separate binomial tests vs. multilevel modelling in animal cognition research.
+
+In animal cognition, we often present animals with a task to test some cognitive ability (_e.g._ theory of mind). In this task, they can either succeed or fail, so we end up with a binary dependent variable. We may give any one individual the same task over multiple trials. It is common in the field to then analyse these data with a binomial test. For example, if the animal got 9/10 trials correct, they are said to have "reached criterion" and passed the task, based on the statistical significance of the binomial test.
+
+```{r}
+binom.test(9, 10)
+```
+
+There are problems with this approach. First, the binomial test assumes that each datapoint is independent of (or _exchangeable_ with) the other datapoints. But this is not true here: individuals complete the trials in a particular order, and even if they are not rewarded for their choices, some amount of learning can occur over trials (e.g. via increased familiarity with the apparatus). This means that the order of trials is important and should not be ignored. Second, the binomial test does not allow us to compare across individuals, or get a sense of the _overall_ average probability of succeeding on the task. Arguably, this is actually what we want to estimate: it's why we sampled many individuals of the species in the first place.
+
+Instead, we could fit a multilevel logistic regression to these data, and include trial order in the model. This deals with the problems above. But this statistical approach is still not common in animal cognition.
+
+To demonstrate the advantages of this approach, I simulate a dummy animal cognition dataset. In this simulation, we first assume that a species can pass a given task with a true probability of 0.6. We then sample a few individuals from this species, and their probabilities of passing the task are drawn from a normal distribution with mean 0.6 and a small standard deviation. For example, we may end up with five individuals, with individual probabilities of 0.5, 0.5, 0.6, 0.6, and 0.8. This represents within-species variability.
+
+Then, we simulate actual success / fail data. Each individual undergoes 20 trials, with success or failure drawn randomly from a binomial distribution with a particular probability. On the first trial, the probability is just the individual's initial probability. But over the trials, these probabilities are updated as the individual familiarises themselves with the apparatus. See the actual code for more details.
+
+We end up with a simulated dataset. I print the first twelve rows below.
+
+```{r echo=F}
+head(readd(d), n = 12)
+```
+
+`ID` is the individual's ID number, `trial` is the trial number, and `success` is a 1 if the individual was successful and 0 if they were not. There are 200 rows (10 individuals, 20 trials each).
+
+The traditional way of analysing these data is to run a separate binomial test for each individual animal. So we run 10 separate binomial tests, and find that 8 of the 10 individuals reach criterion. That seems pretty promising. We could then write this up as "species X pass the test and therefore exhibit cognitive ability Y".
+
+However, we can do better. What are the results of a multilevel model fitted to all the data at once?
+
+```{r, echo=F}
+summary(readd(fitGLMM))
+```
+
+This model includes a random intercept and random slope for trial order, nested within individuals. There are two main things to note about this output. First, it seems that there is a positive effect of trial order in this model. Let's visualise this.
+
+```{r echo=F}
+plot(conditional_effects(readd(fitGLMM)), plot = FALSE)[[1]] +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  scale_y_continuous(limits = c(0, 1)) +
+  theme_classic()
+```
+
+Individuals perform better over time. Also, it seems that they are performing no better than chance on the first trial, before any learning. What's the posterior probability of succeeding on the first trial?
+
+```{r echo=F}
+post <- posterior_samples(readd(fitGLMM))
+data.frame(prob = inv_logit_scaled(post$b_Intercept + post$b_trial)) %>%
+  ggplot(aes(x = prob)) +
+  geom_density(fill = "steelblue") +
+  geom_vline(xintercept = 0.5, linetype = "dashed") +
+  geom_vline(xintercept = 0.6) +
+  scale_x_continuous(name = "Probability of success on first trial", limits = c(0, 1)) +
+  theme_classic() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank())
+```
+
+The dashed line represents chance (0.5), the solid line represents the species-level probability of succeeding that we simulated (0.6). The posterior probability correctly centres around 0.6, but look at how wide the tails of the distribution are. The lower tail crosses zero, suggesting that, in actual fact, this species does not seem to perform above chance, at least before they've familiarised themselves and learned from the apparatus.
+
+We can also compare across individuals with this model, which we cannot do with separate binomial tests. Let's get first trial performance for all the individuals separately.
+
+```{r echo=F, message=F, warning=F}
+tibble(
+  `1`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[1,Intercept]` + post$b_trial + post$`r_ID[1,trial]`),
+  `2`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[2,Intercept]` + post$b_trial + post$`r_ID[2,trial]`),
+  `3`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[3,Intercept]` + post$b_trial + post$`r_ID[3,trial]`),
+  `4`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[4,Intercept]` + post$b_trial + post$`r_ID[4,trial]`),
+  `5`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[5,Intercept]` + post$b_trial + post$`r_ID[5,trial]`),
+  `6`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[6,Intercept]` + post$b_trial + post$`r_ID[6,trial]`),
+  `7`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[7,Intercept]` + post$b_trial + post$`r_ID[7,trial]`),
+  `8`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[8,Intercept]` + post$b_trial + post$`r_ID[8,trial]`),
+  `9`  = inv_logit_scaled(post$b_Intercept + post$`r_ID[9,Intercept]` + post$b_trial + post$`r_ID[9,trial]`),
+  `10` = inv_logit_scaled(post$b_Intercept + post$`r_ID[10,Intercept]` + post$b_trial + post$`r_ID[10,trial]`),
+) %>%
+  gather(key = "ID", value = "prob") %>%
+  mutate(ID = factor(ID, levels = 1:10)) %>%
+  group_by(ID) %>%
+  summarise(mean = mean(prob), upper = quantile(prob, 0.975), lower = quantile(prob, 0.025)) %>%
+  ggplot(aes(y = mean, x = ID)) +
+  geom_errorbar(aes(ymax = upper, ymin = lower), width = 0.25) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  geom_hline(yintercept = 0.6) +
+  scale_y_continuous(name = "Probability of success on first trial", limits = c(0, 1)) +
+  theme_classic()
+```
+
+Only individual 8 seems to be performing above chance in the first trial.
+
+This is one simulation with particular parameters that can and should be varied symstematically. But it does show how binomial tests can produce false positives if there are learning effects over time. Even if individuals don't learn over time, better to include the effect of trial order in one big multilevel model, just to be sure.
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
